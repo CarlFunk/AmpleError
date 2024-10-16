@@ -1,12 +1,14 @@
+//
+//  AmpleErrorTests.swift
+//  AmpleError
+//
+//  Created by Carl Funk on 10/15/24.
+//  Copyright © 2024 Carl Funk. All rights reserved.
+//
+
 import XCTest
 @testable import AmpleError
 
 final class AmpleErrorTests: XCTestCase {
-    func testExample() throws {
-        // XCTest Documentation
-        // https://developer.apple.com/documentation/xctest
-
-        // Defining Test Cases and Test Methods
-        // https://developer.apple.com/documentation/xctest/defining_test_cases_and_test_methods
-    }
+    func testExample() throws { }
 }
