@@ -26,13 +26,15 @@ public final class RetryManager: ObservableObject {
     private weak var parentNode: RetryManager?
     private var childrenNodes: [RetryManager]
     
+    public let tag: String
     public let presentationBehavior: PresentationBehavior
     public let retryBehavior: RetryBehavior
     
-    @Published public private(set) var errors: [LocalizedError]
-    @Published public private(set) var presentationSuppressed: Bool
+    public private(set) var errors: [LocalizedError]
+    public private(set) var presentationSuppressed: Bool
     
     private init(
+        tag: String = UUID().uuidString,
         parentNode: RetryManager? = nil,
         childrenNodes: [RetryManager] = [],
         presentationBehavior: PresentationBehavior = .acceptsSuppression,
@@ -40,6 +42,7 @@ public final class RetryManager: ObservableObject {
         errors: [LocalizedError] = [],
         presentationSuppressed: Bool = false
     ) {
+        self.tag = tag
         self.parentNode = parentNode
         self.childrenNodes = childrenNodes
         self.presentationBehavior = presentationBehavior
@@ -55,23 +58,27 @@ public final class RetryManager: ObservableObject {
     // MARK: - Nodes
     
     public static func root(
+        tag: String = UUID().uuidString,
         presentationBehavior: PresentationBehavior = .acceptsSuppression,
         retryBehavior: RetryBehavior = .ancestor
     ) -> RetryManager {
         RetryManager(
-            presentationBehavior: presentationBehavior, 
+            tag: tag,
+            presentationBehavior: presentationBehavior,
             retryBehavior: retryBehavior
         )
     }
     
     public func node(
-        presentationBehavior: PresentationBehavior? = nil,
-        retryBehavior: RetryBehavior? = nil
+        tag: String = UUID().uuidString,
+        presentationBehavior: PresentationBehavior = .acceptsSuppression,
+        retryBehavior: RetryBehavior = .ancestor
     ) -> RetryManager {
         let childNode = RetryManager(
-            parentNode: self, 
-            presentationBehavior: presentationBehavior ?? self.presentationBehavior, 
-            retryBehavior: retryBehavior ?? self.retryBehavior)
+            tag: tag,
+            parentNode: self,
+            presentationBehavior: presentationBehavior,
+            retryBehavior: retryBehavior)
         childrenNodes.append(childNode)
         return childNode
     }
@@ -86,13 +93,36 @@ public final class RetryManager: ObservableObject {
         !errors.isEmpty
     }
     
+    public var hasSingleError: Bool {
+        errors.count == 1
+    }
+    
+    public var hasRetryableError: Bool {
+        errors.contains(where: { ($0 as? RetryableError) != nil || ($0 as? ParentError) != nil })
+    }
+    
     public func receive(error: LocalizedError) {
         errors.append(error)
+        updateUI()
         notifyParent()
+    }
+    
+    public func removeAllErrors() {
+        errors.removeAll()
+        updateUI()
+    }
+    
+    public func remove(error: LocalizedError) {
+        errors.removeAll(where: { $0.localizedDescription == error.localizedDescription })
+        updateUI()
     }
     
     public func retry() {
         internalRetry()
+    }
+    
+    public func detach() {
+        parentNode?.childrenNodes.removeAll(where: { $0 === self })
     }
     
     // MARK: - Retry
@@ -121,10 +151,11 @@ public final class RetryManager: ObservableObject {
             default:
                 break
             }
+            
+            remove(error: error)
         }
         
-        errors = []
-        presentationSuppressed = false
+        unsuppressPresentation()
     }
     
     private func retryDescendants() {
@@ -150,9 +181,19 @@ public final class RetryManager: ObservableObject {
         parentNode.suppressDescendantsPresentationIfRequired()
     }
     
+    private func unsuppressPresentation() {
+        presentationSuppressed = false
+        updateUI()
+    }
+    
+    private func suppressPresentation() {
+        presentationSuppressed = true
+        updateUI()
+    }
+    
     private func suppressDescendantsPresentation() {
         childrenNodes.forEach {
-            $0.presentationSuppressed = true
+            $0.suppressPresentation()
             $0.suppressDescendantsPresentation()
         }
     }
@@ -164,11 +205,19 @@ public final class RetryManager: ObservableObject {
         let hasPrefersDisplay = childrenNodes
             .contains(where: { $0.presentationBehavior == .prefersDisplay })
         
-        if !hasPrefersDisplay && childrenNodesWithError.count > 1 {
-            errors.append(ParentError())
-            suppressDescendantsPresentation()
+        if !hasPrefersDisplay && (childrenNodesWithError.count > 1 || childrenNodesWithError.count == childrenNodes.count) {
+            receive(error: ParentError())
         } else {
-            childrenNodes.forEach { $0.suppressDescendantsPresentation() }
+            childrenNodesWithError.forEach { $0.suppressDescendantsPresentation() }
+        }
+    }
+    
+    // MARK: - Private
+    
+    private func updateUI() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.objectWillChange.send()
         }
     }
 }
